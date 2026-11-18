@@ -4,8 +4,17 @@ Pydantic validation schemas with typed field constraints, schema descriptions,
 and OpenAPI documentation metadata for all AeroFamily endpoints.
 """
 
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Dict, Any, List, Union
+from pydantic import BaseModel, Field
+from models.enums import (
+    MaskType,
+    CommuteMode,
+    HomeSealing,
+    CookingFuel,
+    HousingType,
+    HumidifierWaterType,
+    IncidentSeverity,
+)
 
 
 class FamilyProfileSchema(BaseModel):
@@ -47,13 +56,13 @@ class FamilyProfileSchema(BaseModel):
         examples=[2]
     )
     housingType: str = Field(
-        default="apartment",
+        default=HousingType.APARTMENT.value,
         max_length=50,
         description="Building envelope type: 'apartment', 'independent_house', or 'villa'.",
         examples=["apartment"]
     )
     cookingFuel: str = Field(
-        default="gas",
+        default=CookingFuel.GAS.value,
         max_length=50,
         description="Primary kitchen fuel: 'gas', 'induction', or 'electric'.",
         examples=["gas"]
@@ -152,12 +161,12 @@ class ImpactSimRequestSchema(BaseModel):
 
     cityKey: str = Field(default="delhi", max_length=50)
     commuteChoice: str = Field(
-        default="metro",
+        default=CommuteMode.METRO.value,
         max_length=50,
         description="'metro', 'carpool', 'solo_car', or 'cycling'."
     )
     maskChoice: str = Field(
-        default="n95",
+        default=MaskType.N95.value,
         max_length=50,
         description="'none', 'cloth', 'surgical', or 'n95'."
     )
@@ -168,12 +177,12 @@ class ImpactSimRequestSchema(BaseModel):
         description="Daily hours air purifier is active inside the residence."
     )
     homeSealing: str = Field(
-        default="sealed",
+        default=HomeSealing.SEALED.value,
         max_length=50,
         description="'sealed', 'average', or 'leaky'."
     )
     cookingMode: str = Field(
-        default="induction_vented",
+        default=CookingFuel.INDUCTION_VENTED.value,
         max_length=50,
         description="'gas_unvented', 'gas_vented', or 'induction_vented'."
     )
