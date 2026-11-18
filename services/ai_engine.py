@@ -1,18 +1,37 @@
 """
 ai_engine.py
 GenAI environmental and clinical reasoning assistant for navigating severe winter smog.
-Supports Google Gemini API with fallback to built-in clinical/environmental reasoning engine.
+Provides multi-turn conversational advisory grounded in real-time meteorology,
+inversion physics, and personalized household vulnerability profiles.
+Supports Google Gemini 1.5 Flash API with deterministic clinical fallback.
 """
 
 import json
 import os
-from typing import Dict, Any, List, Optional
+import urllib.request
+import urllib.error
+from typing import Dict, Any, Optional
+from core.config import get_logger
+
+logger = get_logger(__name__)
+
 
 def build_vulnerability_summary(profile: Optional[Dict[str, Any]]) -> str:
-    """Produces human-readable description of household vulnerabilities."""
+    """Produces a human-readable clinical summary of household vulnerabilities for AI prompts.
+
+    Args:
+        profile (Optional[Dict[str, Any]]): Demographic dictionary with counts of vulnerable members.
+
+    Returns:
+        str: Formatted string describing active clinical sensitivities, or 'Standard Adult Risk Profile'.
+
+    Example:
+        >>> build_vulnerability_summary({"infants": 1, "asthmatics": 1})
+        '1 Toddler/Infant (Underdeveloped lung alveoli), 1 Asthmatic/Respiratory (Bronchial hyper-reactivity)'
+    """
     if not profile:
         return "Standard Adult Risk Profile"
-    
+
     tags = []
     if profile.get("infants", 0) > 0:
         tags.append(f"{profile['infants']} Toddler/Infant (Underdeveloped lung alveoli)")
@@ -25,25 +44,37 @@ def build_vulnerability_summary(profile: Optional[Dict[str, Any]]) -> str:
 
     return ", ".join(tags) if tags else "Standard Adult Risk Profile"
 
+
 def query_gemini_api(
     message: str,
     city: Dict[str, Any],
     profile: Optional[Dict[str, Any]],
     api_key: str
 ) -> Optional[str]:
-    """Queries Gemini 1.5 Flash API with environmental context."""
+    """Queries the Google Gemini 1.5 Flash API with rich environmental and clinical context.
+
+    Args:
+        message (str): User prompt or question.
+        city (Dict[str, Any]): Active city meteorological data including PM2.5, AQI, and inversion depth.
+        profile (Optional[Dict[str, Any]]): Household vulnerability profile.
+        api_key (str): Google Gemini API key.
+
+    Returns:
+        Optional[str]: Generated markdown response from Gemini, or None if the call fails.
+    """
     try:
-        import urllib.request
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
+
         vuln_text = build_vulnerability_summary(profile)
         system_instruction = (
             f"You are AeroFamily Guardian, an expert GenAI air quality and environmental health assistant. "
-            f"Current Location: {city['name']}, Outdoor PM2.5: {city['pm25']} µg/m³, AQI: {city['aqi']} ({city['status']}). "
-            f"Inversion Layer: {city['inversionStrength']}, Recommended Midday Ventilation Window: {city['ventilationWindow']}. "
+            f"Current Location: {city.get('name', 'Local')}, Outdoor PM2.5: {city.get('pm25', 100)} µg/m³, "
+            f"AQI: {city.get('aqi', 150)} ({city.get('status', 'Unhealthy')}). "
+            f"Inversion Layer: {city.get('inversionStrength', 'Active')}, "
+            f"Recommended Midday Ventilation Window: {city.get('ventilationWindow', '12:30 PM - 2:30 PM')}. "
             f"Family Vulnerabilities: {vuln_text}. "
             f"Provide compassionate, scientifically precise advice on daily routines, IAQ hacks (Corsi-Rosenthal box, draft sealing), "
-            f"and explain direct personal and community impact."
+            f"and explain direct personal and community impact in Indian Rupees (₹)."
         )
 
         payload = {
@@ -55,27 +86,49 @@ def query_gemini_api(
                 "maxOutputTokens": 1000
             }
         }
-        
+
         req_bytes = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=req_bytes, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=8) as response:
+        req = urllib.request.Request(
+            url,
+            data=req_bytes,
+            headers={"Content-Type": "application/json"}
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as response:
             res_json = json.loads(response.read().decode("utf-8"))
-            return res_json["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception:
+            candidates = res_json.get("candidates", [])
+            if candidates:
+                return candidates[0]["content"]["parts"][0]["text"]
+            return None
+
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as err:
+        logger.warning("Gemini API call failed (%s). Falling back to clinical reasoning engine.", str(err))
         return None
+    except Exception as err:
+        logger.error("Unexpected error in query_gemini_api: %s", str(err), exc_info=True)
+        return None
+
 
 def generate_offline_reasoning(
     message: str,
     city: Dict[str, Any],
     profile: Optional[Dict[str, Any]]
 ) -> str:
-    """
-    Built-in expert clinical and environmental reasoning engine.
-    Produces rich markdown with quantified impacts, warning alerts, and actionable steps.
+    """Built-in clinical and environmental reasoning engine.
+
+    Provides deterministic, science-backed guidance when Gemini is offline or API key is absent.
+
+    Args:
+        message (str): User inquiry text.
+        city (Dict[str, Any]): Active city record with meteorological indicators.
+        profile (Optional[Dict[str, Any]]): Active household profile.
+
+    Returns:
+        str: Comprehensive, formatted markdown guidance tailored to the inquiry.
     """
     msg = message.lower()
     vuln_summary = build_vulnerability_summary(profile)
-    cigs_equiv = round(city["pm25"] / 22.0, 1)
+    cigs_equiv = round(city.get("pm25", 100.0) / 22.0, 1)
 
     # 1. Topic: Pediatric / School / Outdoor Play
     if any(k in msg for k in ["school", "child", "kid", "baby", "play", "outdoor", "park", "sports", "recess"]):
@@ -88,24 +141,20 @@ def generate_offline_reasoning(
 #### 🚨 Clinical Assessment for Your Family ({vuln_summary}):
 Children are disproportionately harmed by winter smog:
 - **Tidal Volume & Rate:** Children inhale **50% more air per kg of body mass** than adults.
-- **Immature Alveoli:** Fine PM2.5 particles penetrate past immature bronchiolar walls into capillary beds, initiating systemic oxidative stress and suppressing lung volume development.
+- **Lung Architecture:** Alveolar proliferation continues until age 8; fine particles (PM2.5) permanently stunt airway caliber.
+- **Near-Ground Microclimate:** Heavier diesel soot concentrates within 1 meter of ground level where young children walk and play.
 
-#### 📋 Actionable Directives:
-1. **Physical Activity & School Sports:**
-   - Immediately cancel outdoor physical education (P.E.), running, and soccer. Intense aerobic breathing causes oral respiration, bypassing the nasal filter entirely.
-   - Switch to indoor yoga, stretching, or reading in a HEPA-filtered safe room.
-2. **School Commute Protocol:**
-   - Equip your child with a certified, well-sealed **KF94 or pediatric KN95 mask**. Cloth/surgical masks leak 70%+ of toxic sub-micron particulates around nasal margins.
-   - When driving, keep vehicle windows strictly rolled up with HVAC set to **100% Recirculation mode**.
-3. **Midday Window Caution:**
-   - Even during the midday ventilation window (**{city['ventilationWindow']}**), children should remain indoors if outdoor PM2.5 exceeds 100 µg/m³.
+#### 💡 Actionable Pediatric Protocol:
+1. **Cancel Strenuous Outdoor Recess:** Move physical activities indoors. Aerobic exercise triples minute ventilation, driving micro-dust deep into bronchioles.
+2. **Pediatric Mask Fit:** Standard adult masks leave massive edge leak gaps (>40%). Use child-specific **KF94 or KN95 Small** masks with an adjustable nose wire.
+3. **Midday Green Window:** If outdoor play is unavoidable, restrict it strictly to **{city['ventilationWindow']}** when solar heating temporarily breaks the thermal stagnation cap.
 
-> **Direct Impact:** Keeping your child shielded indoors today prevents approx. **360–420 micrograms of toxic heavy-metal laden particulates** from depositing in their alveolar sacs."""
+> **Direct Impact:** Shifting a 45-minute outdoor sports practice indoors prevents **~95 µg of toxic particulate deposition** in your child's alveolar sacs today."""
 
-    # 2. Topic: Corsi-Rosenthal Box / DIY Air Purifiers
-    elif any(k in msg for k in ["corsi", "rosenthal", "diy", "box fan", "purifier", "cadr", "merv"]):
-        return f"""### 🛠️ DIY Corsi-Rosenthal Box Air Filtration Blueprint
-**Context:** {city['name']} | **Indoor Clean Air Delivery Strategy**
+    # 2. Topic: DIY Air Purifiers / Corsi-Rosenthal Box
+    elif any(k in msg for k in ["purifier", "filter", "c-r", "corsi", "box fan", "diy", "hepa", "cost", "cleaner"]):
+        return f"""### 🔬 DIY Corsi-Rosenthal (C-R) Box Engineering Guide
+**Status:** Highly Recommended Alternative for {city['name']} during Severe Winter Smog.
 
 ---
 
@@ -138,44 +187,40 @@ Children are disproportionately harmed by winter smog:
 ---
 
 #### 🛑 The Morning Stagnation Hazard:
-Between 06:30 AM and 09:30 AM, cold surface air is capped by the winter thermal inversion. Exhaust fumes from trucks and cold engines accumulate in arterial canyons.
+Between 07:00 and 09:30 AM, cold nocturnal boundary layers suppress vehicular tailpipe exhaust directly at street level. 
 
-#### 🔄 Sustainable Alternatives & Shielding:
-1. **Switch to Underground Electric Metro:**
-   - Reduces personal inhaled particulate dose by **65% to 75%** compared to riding a two-wheeler or sitting in non-recirculated car traffic.
-   - Averts 3.6 kg of CO2e and 35g of tailpipe PM emissions per trip.
-2. **Vehicle Cabin Recirculation Protocol:**
-   - Never use "Fresh Air" intake on winter mornings. Set HVAC strictly to **Internal Recirculation**.
-   - Upgrade your vehicle cabin air filter to a **True HEPA / Activated Carbon cabin insert**.
-3. **Neighborhood Carpooling:**
-   - Consolidate school or office trips into a 3-family carpool pod. Eliminating 2 cold starts takes 2 vehicles off the road during peak inversion hours.
-4. **Postpone Outdoor Cycling / Jogging:**
-   - High ventilation during cycling forces 45–60 L/min of air deep into bronchial branches. Save intense cardio for indoor air-purified rooms."""
+#### 🛡️ Low-Exposure Commute Hierarchy:
+1. **Gold Standard — Underground Electric Metro:**
+   - Deep underground stations avoid the surface inversion layer.
+   - Eliminates personal driving emissions entirely (**-2.1 kg CO2e/trip**).
+2. **Silver Standard — School/Work Carpool Pod:**
+   - Cuts neighborhood vehicular cold-starts.
+   - Keep car windows strictly closed; set HVAC to **100% Recirculation** mode (cuts in-cabin PM2.5 by 80% within 4 minutes).
+3. **High Risk — Open Two-Wheelers / Walking along Arterials:**
+   - Inhales raw diesel soot and tire wear microplastics.
+   - Mandatory: Wear a well-fitted **N95/FFP2 respirator**. Simple cloth or surgical masks leak >60% of ultra-fine particles along the sides."""
 
-    # 4. Topic: Ventilation / Windows / CO2 vs Smog
-    elif any(k in msg for k in ["window", "ventilate", "ventilation", "fresh air", "air exchange", "co2", "stuffy", "purge"]):
-        return f"""### 🪟 The 20-Minute Midday Inversion Purge Protocol
-**City:** {city['name']} | **Optimal Ventilation Window Today:** **{city['ventilationWindow']}**
+    # 4. Topic: Natural Ventilation & Opening Windows
+    elif any(k in msg for k in ["window", "ventilate", "ventilation", "fresh air", "air out", "smell", "co2"]):
+        return f"""### 💨 Strategic Winter Inversion Ventilation Protocol
+**City:** {city['name']} | **Optimal Daily Window:** **{city['ventilationWindow']}**
 
 ---
 
-#### ⚖️ The Balancing Act: Smog vs Carbon Dioxide (CO2)
-Keeping a house sealed 24/7 with a full family causes indoor CO2 to rise past **1,500 - 2,000 ppm**, causing headaches, lethargy, cognitive decline, and reduced immune defense. Yet opening windows in the morning floods the home with toxic winter particulates.
+#### 🛑 The Winter Inversion Paradox:
+Sealing your home prevents outdoor smog from entering, but human exhalation causes indoor CO2 to climb past **1,800 ppm**, inducing headaches, brain fog, and poor sleep. Opening windows at the wrong time floods the house with toxic particulate soot.
 
-#### ⏱️ The Execution Protocol:
-1. **Strictly Blackout Hours:** 06:00 - 10:30 AM and 18:30 - 22:30 PM (strongest surface inversion, peak vehicle exhaust).
-2. **Optimal Window:** **{city['ventilationWindow']}**. Solar insolation breaks the surface inversion, boundary layer height rises, and outdoor particulate concentration reaches diurnal lows.
-3. **Cross-Ventilation Flush:** Open opposite windows wide for **exactly 15 to 20 minutes**. High air throughput flushes accumulated CO2 from 1,800 ppm to 650 ppm without chilling down furniture and walls.
-4. **Immediate Post-Flush Scrubbing:** Seal all windows immediately at minute 20, then run your HEPA purifier or Corsi-Rosenthal box on **TURBO for 25 minutes** to capture newly introduced particulates.
+#### ⏱️ The 20-Minute Convective Purge Protocol:
+1. **Never Ventilate at Night or Early Morning:** Between 06:00–10:00 AM and 19:00–23:00 PM, cold boundary layer compression traps maximum pollution.
+2. **Ventilate at the Midday Diurnal Peak ({city['ventilationWindow']}):** Solar thermal heating breaks the ground inversion, wind speeds pick up, and pollution hits its lowest 24-hr concentration.
+3. **Cross-Draft Purge:** Open opposite windows wide for exactly **15 to 20 minutes** to rapidly replace stale room air.
+4. **Immediate Reseal & Turbo Clean:** Seal all windows and run your air purifier on Turbo/High for 30 minutes to scrub any entered particulates back to sub-15 µg/m³."""
 
-> **Result:** Fresh oxygen without trapped winter smog."""
-
-    # 5. Default / Comprehensive Plan
-    else:
-        return f"""### 🛡️ AeroFamily Clean Air Intelligence Briefing
-**Location:** {city['name']} | **Current AQI:** {city['aqi']} ({city['status']})  
-**Particulate Loading:** PM2.5: **{city['pm25']} µg/m³** | PM10: {city['pm10']} µg/m³  
-**Household Shield Active:** {vuln_summary}
+    # 5. Default General Guidance
+    return f"""### 🛡️ AeroFamily Guardian Advisory for {city['name']}
+**Current Ambient Conditions:** PM2.5: **{city['pm25']} µg/m³** ({city['status']}) | AQI: **{city['aqi']}**  
+**Active Inversion Layer:** {city['inversionStrength']}  
+**Configured Family Profile:** {vuln_summary}
 
 ---
 
@@ -198,18 +243,33 @@ The winter thermal inversion over {city['name']} creates a stagnant boundary lay
 
 *Ask any specific question about pediatric safeguards, DIY purifier sizing, window sealing, or low-emission heating!*"""
 
+
 def generate_ai_response(
     message: str,
     city: Dict[str, Any],
     profile: Optional[Dict[str, Any]],
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Orchestrates AI response generation via Gemini API with offline fallback."""
+    """Orchestrates AI response generation using Gemini with automatic clinical fallback.
+
+    Args:
+        message (str): User inquiry string.
+        city (Dict[str, Any]): Active city environmental record.
+        profile (Optional[Dict[str, Any]]): Active household profile.
+        api_key (Optional[str], optional): Optional API key override.
+
+    Returns:
+        Dict[str, Any]: Response payload containing 'reply', 'source', and 'city'.
+    """
     key = api_key or os.environ.get("GEMINI_API_KEY")
     if key:
         gemini_res = query_gemini_api(message, city, profile, key)
         if gemini_res:
-            return {"reply": gemini_res, "source": "gemini-1.5-flash", "city": city["name"]}
-            
+            return {"reply": gemini_res, "source": "gemini-1.5-flash", "city": city.get("name", "Local")}
+
     offline_reply = generate_offline_reasoning(message, city, profile)
-    return {"reply": offline_reply, "source": "clinical-environmental-reasoning-engine", "city": city["name"]}
+    return {
+        "reply": offline_reply,
+        "source": "clinical-environmental-reasoning-engine",
+        "city": city.get("name", "Local")
+    }

@@ -1,4 +1,10 @@
-// AeroFamily - Smog & Clean Air Intelligence Knowledge Base
+/**
+ * @file data.js
+ * @description Static Smog & Clean Air Intelligence Knowledge Base.
+ * Houses offline hotspot records, WHO 2021 air quality benchmarks,
+ * IAQ engineering hack specifications, and community initiatives.
+ */
+"use strict";
 
 const AERO_DATA = {
   cities: {

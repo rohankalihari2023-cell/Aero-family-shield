@@ -1,4 +1,10 @@
-// AeroFamily - Indoor Air Quality (IAQ) Hacks & DIY Engineering Lab (Clean White Edition)
+/**
+ * @file iaq-lab.js
+ * @description Indoor Air Quality (IAQ) Hacks & DIY Engineering Lab.
+ * Manages Corsi-Rosenthal Box CADR calculations, ultrasonic humidifier
+ * mineral dust simulations, and DIY air defense instructions.
+ */
+"use strict";
 
 const IAQLab = {
   init() {

@@ -1,4 +1,10 @@
-// AeroFamily - Community Clean Air Action Hub Module (Clean White Edition)
+/**
+ * @file community-hub.js
+ * @description Community Clean Air Action Hub Module.
+ * Facilitates citizen reporting of open burning/diesel violations,
+ * displays local clean air pods, safe havens, and neighborhood pledges.
+ */
+"use strict";
 
 const CommunityHub = {
   reports: [],

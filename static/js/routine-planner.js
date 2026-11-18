@@ -1,4 +1,10 @@
-// AeroFamily - Low-Emission Daily Routine Planner Module (Clean White Edition)
+/**
+ * @file routine-planner.js
+ * @description 24-Hour Low-Emission Daily Routine Planner Module.
+ * Visualizes personalized diurnal timelines, quantified exposure metrics,
+ * and smog-safe habit alternatives.
+ */
+"use strict";
 
 const RoutinePlanner = {
   currentPlan: null,

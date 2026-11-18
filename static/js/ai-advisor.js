@@ -1,4 +1,10 @@
-// AeroFamily - GenAI Clean Air Assistant Module (Clean White Edition)
+/**
+ * @file ai-advisor.js
+ * @description GenAI Clean Air Assistant Module.
+ * Facilitates multi-turn contextual dialog, client-side Markdown parsing,
+ * clinical vulnerability awareness, and quick guidance prompts.
+ */
+"use strict";
 
 const AIAdvisor = {
   chatHistory: [],

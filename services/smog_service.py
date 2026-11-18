@@ -198,16 +198,37 @@ CITIES_REGISTRY: Dict[str, Dict[str, Any]] = {
     }
 }
 
-@lru_cache(maxsize=32)
-def calculate_diurnal_curve(base_pm25: float) -> List[Dict[str, Any]]:
+# Type aliases for enhanced readability and strict type safety
+CityRecord = Dict[str, Any]
+HourlyEntry = Dict[str, Any]
+HourlyCurve = List[HourlyEntry]
+
+
+@lru_cache(maxsize=64)
+def calculate_diurnal_curve(base_pm25: float) -> HourlyCurve:
+    """Computes a 24-hour diurnal cycle of PM2.5 based on atmospheric inversion dynamics.
+
+    In cold winter months, solar radiation heats the ground layer at midday (12:00-14:00),
+    breaking the nocturnal thermal lid and enabling atmospheric convective mixing.
+    At night and early morning (05:00-09:00), radiant cooling traps particulates.
+
+    Args:
+        base_pm25 (float): The baseline 24-hour mean PM2.5 concentration in µg/m³.
+
+    Returns:
+        HourlyCurve: A 24-element list of hourly records with timestamp, particulate value,
+            WHO color coding, category, and ventilation window flags.
+
+    Example:
+        >>> curve = calculate_diurnal_curve(100.0)
+        >>> len(curve)
+        24
     """
-    Computes 24-hour diurnal cycle of PM2.5 based on atmospheric inversion dynamics.
-    Optimized with lru_cache for high efficiency.
-    """
-    curve = []
+    safe_base = max(1.0, float(base_pm25))
+    curve: HourlyCurve = []
     for h in range(24):
         mult = DIURNAL_INVERSION_MULTIPLIERS.get(h, 1.0)
-        pm_val = round(base_pm25 * mult, 1)
+        pm_val = round(safe_base * mult, 1)
         time_label = f"{h:02d}:00"
 
         if pm_val < 35.0:
@@ -240,13 +261,23 @@ def calculate_diurnal_curve(base_pm25: float) -> List[Dict[str, Any]]:
         })
     return curve
 
-def get_city_data(city_id: str) -> Optional[Dict[str, Any]]:
-    """Returns city data with hourly diurnal forecast included."""
-    if city_id not in CITIES_REGISTRY:
+
+def get_city_data(city_id: str) -> Optional[CityRecord]:
+    """Retrieves full environmental and inversion profile for a registered city.
+
+    Args:
+        city_id (str): The unique city identifier key (e.g. 'delhi', 'lahore', 'current_location').
+
+    Returns:
+        Optional[CityRecord]: Full city profile dictionary including 24-hour diurnal curve,
+            or None if the city is not registered in the database.
+    """
+    if not city_id or city_id not in CITIES_REGISTRY:
         return None
     city = CITIES_REGISTRY[city_id]
     hourly = calculate_diurnal_curve(city["pm25"])
     return {**city, "hourly": hourly}
+
 
 def register_custom_city(
     name: str,
@@ -256,36 +287,50 @@ def register_custom_city(
     country: str = "Custom Region",
     humidity: float = 65.0,
     wind_speed: float = 4.0
-) -> Dict[str, Any]:
-    """Adds a new custom city or microclimate to the in-memory registry safely."""
+) -> CityRecord:
+    """Adds a new user-defined localized microclimate to the in-memory registry.
+
+    Args:
+        name (str): The human-readable name of the microclimate or neighborhood.
+        pm25 (float): Baseline particulate concentration in µg/m³.
+        aqi (Optional[int], optional): Air Quality Index. Computed automatically if omitted.
+        temperature (float, optional): Ambient temperature in Celsius. Defaults to 10.0.
+        country (str, optional): Country or jurisdiction name. Defaults to "Custom Region".
+        humidity (float, optional): Relative humidity percentage. Defaults to 65.0.
+        wind_speed (float, optional): Wind speed in km/h. Defaults to 4.0.
+
+    Returns:
+        CityRecord: The registered city record complete with 24-hour diurnal curve.
+    """
     cid = f"custom_{abs(hash(name)) % 100000}"
-    computed_aqi = aqi if aqi is not None else int(pm25 * 1.25)
-    
-    if pm25 > 250:
+    safe_pm25 = max(1.0, float(pm25))
+    computed_aqi = int(aqi) if aqi is not None else int(safe_pm25 * 1.25)
+
+    if safe_pm25 > 250:
         cat = "hazardous"
         status = "Severe / Hazardous"
-    elif pm25 > 150:
+    elif safe_pm25 > 150:
         cat = "very-unhealthy"
         status = "Very Unhealthy"
-    elif pm25 > 75:
+    elif safe_pm25 > 75:
         cat = "unhealthy"
         status = "Unhealthy"
-    elif pm25 > 35:
+    elif safe_pm25 > 35:
         cat = "sensitive"
         status = "Unhealthy for Sensitive Groups"
     else:
         cat = "moderate"
         status = "Moderate"
 
-    new_city = {
+    new_city: CityRecord = {
         "id": cid,
         "name": name,
         "country": country,
         "aqi": computed_aqi,
         "status": status,
         "category": cat,
-        "pm25": float(pm25),
-        "pm10": float(pm25 * 1.45),
+        "pm25": float(safe_pm25),
+        "pm10": float(round(safe_pm25 * 1.45, 1)),
         "no2": 42.0,
         "co": 1.5,
         "temperature": float(temperature),
@@ -300,6 +345,7 @@ def register_custom_city(
     CITIES_REGISTRY[cid] = new_city
     return {**new_city, "hourly": calculate_diurnal_curve(new_city["pm25"])}
 
+
 def process_current_location_weather(
     lat: float,
     lon: float,
@@ -308,20 +354,34 @@ def process_current_location_weather(
     live_temperature: Optional[float] = None,
     live_humidity: Optional[float] = None,
     live_wind_speed: Optional[float] = None
-) -> Dict[str, Any]:
-    """
-    Synthesizes and registers real-time weather and air quality data for the user's detected GPS coordinates.
-    Integrates live meteorological observations or computes high-precision atmospheric inversion heuristics.
+) -> CityRecord:
+    """Synthesizes and registers real-time meteorological & air sensor data for user GPS coordinates.
+
+    Args:
+        lat (float): User device latitude.
+        lon (float): User device longitude.
+        location_name (Optional[str], optional): Reverse-geocoded locality name.
+        live_pm25 (Optional[float], optional): Sensor-observed PM2.5 in µg/m³.
+        live_temperature (Optional[float], optional): Sensor-observed temperature in °C.
+        live_humidity (Optional[float], optional): Sensor-observed relative humidity in %.
+        live_wind_speed (Optional[float], optional): Sensor-observed wind speed in km/h.
+
+    Returns:
+        CityRecord: Complete city profile stored under 'current_location' with diurnal curve.
     """
     city_name = location_name or f"Current Location ({lat:.2f}°, {lon:.2f}°)"
-    
-    # Use live inputs if passed from client, or calculate localized atmospheric baseline
+
     temp = float(live_temperature) if live_temperature is not None else 12.0
     humid = float(live_humidity) if live_humidity is not None else 65.0
     wind = float(live_wind_speed) if live_wind_speed is not None else 4.2
-    
-    # Calculate PM2.5: if live sensor provided, use it; otherwise compute realistic winter stagnation index
-    pm25 = float(live_pm25) if live_pm25 is not None else max(25.0, round(120.0 - (wind * 8.0) + (temp < 5.0 and 40.0 or 0.0), 1))
+
+    # Calculate PM2.5: use live reading or atmospheric stagnation heuristic
+    if live_pm25 is not None:
+        pm25 = float(live_pm25)
+    else:
+        thermal_cold_bonus = 40.0 if temp < 5.0 else 0.0
+        pm25 = max(25.0, round(120.0 - (wind * 8.0) + thermal_cold_bonus, 1))
+
     aqi = int(pm25 * 1.25)
 
     if pm25 > 250:
@@ -345,9 +405,13 @@ def process_current_location_weather(
         status = "Moderate / Fair"
         grap = "Normal Clean Air Protocol"
 
-    inversion_desc = "High Ground Stagnation (Inversion Trapping <90m)" if wind < 5.0 else "Moderate Mixing Layer"
+    inversion_desc = (
+        "High Ground Stagnation (Inversion Trapping <90m)"
+        if wind < 5.0
+        else "Moderate Mixing Layer"
+    )
 
-    current_loc_data = {
+    current_loc_data: CityRecord = {
         "id": "current_location",
         "name": f"📍 {city_name}",
         "country": "Local Observation",
@@ -366,8 +430,15 @@ def process_current_location_weather(
         "inversionStrength": inversion_desc,
         "ventilationWindow": "12:30 PM - 2:30 PM",
         "grapStage": grap,
-        "dominantSources": ["Local vehicular emissions", "Winter nocturnal inversion", "Localized domestic heating"],
-        "advisory": f"Real-time localized meteorological & smog reading for {city_name}. Stagger outdoor commutes away from morning boundary layer compression."
+        "dominantSources": [
+            "Local vehicular emissions",
+            "Winter nocturnal inversion",
+            "Localized domestic heating"
+        ],
+        "advisory": (
+            f"Real-time localized meteorological & smog reading for {city_name}. "
+            "Stagger outdoor commutes away from morning boundary layer compression."
+        )
     }
 
     CITIES_REGISTRY["current_location"] = current_loc_data

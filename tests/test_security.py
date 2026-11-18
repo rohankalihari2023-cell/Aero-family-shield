@@ -56,8 +56,15 @@ class TestSecurity(unittest.TestCase):
         self.assertNotIn("<script>", clean["housingType"])
 
     def test_security_headers_configured(self):
-        """Verify critical OWASP security headers exist."""
+        """Verify critical OWASP security headers exist with comprehensive CSP rules."""
         self.assertIn("X-Content-Type-Options", SECURITY_HEADERS)
+        self.assertEqual(SECURITY_HEADERS["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(SECURITY_HEADERS["X-Frame-Options"], "DENY")
+        self.assertIn("Content-Security-Policy", SECURITY_HEADERS)
+        csp = SECURITY_HEADERS["Content-Security-Policy"]
+        self.assertIn("https://api.open-meteo.com", csp)
+        self.assertIn("https://api.bigdatacloud.net", csp)
+        self.assertIn("Permissions-Policy", SECURITY_HEADERS)
         self.assertEqual(SECURITY_HEADERS["X-Content-Type-Options"], "nosniff")
         self.assertIn("X-Frame-Options", SECURITY_HEADERS)
         self.assertEqual(SECURITY_HEADERS["X-Frame-Options"], "DENY")

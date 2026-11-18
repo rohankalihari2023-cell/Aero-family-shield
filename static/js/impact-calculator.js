@@ -1,4 +1,10 @@
-// AeroFamily - Interactive Impact Calculator & Scenario Simulator (Clean White Edition)
+/**
+ * @file impact-calculator.js
+ * @description Interactive Impact Calculator & Scenario Simulator.
+ * Computes inhaled particulate dosages, Berkeley Earth cigarette equivalencies,
+ * and monthly CO2e savings based on user lifestyle choices.
+ */
+"use strict";
 
 const ImpactCalculator = {
   init() {

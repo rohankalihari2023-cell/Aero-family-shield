@@ -1,4 +1,10 @@
-// AeroFamily - Main Application Controller & State Engine (Clean White Edition)
+/**
+ * @file app.js
+ * @description AeroFamily - Main Application Controller & State Engine.
+ * Manages active city state, geolocation weather sync, navigation tabs,
+ * household profile persistence, and sub-module lifecycle orchestration.
+ */
+"use strict";
 
 const App = {
   currentCityId: "delhi",
